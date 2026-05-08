@@ -34,9 +34,8 @@ async def lifespan(app: FastAPI):
     app.state.dp = dp
     yield
 
-    await bot.delete_webhook()
     await bot.session.close()
-    logger.info("Webhook deleted, bot stopped")
+    logger.info("Bot session closed")
 
 
 app = FastAPI(lifespan=lifespan)
