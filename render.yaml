@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: personal-assistant
+    runtime: docker
+    plan: free
+    envVars:
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: WEBHOOK_BASE_URL
+        sync: false
+      - key: ALLOWED_USER_ID
+        sync: false
