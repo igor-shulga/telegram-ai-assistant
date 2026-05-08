@@ -15,7 +15,7 @@ async def chat(messages: list[dict]) -> str:
     api_key = os.environ["OPENROUTER_API_KEY"]
 
     payload = {
-        "model": "google/gemma-3-27b-it:free",
+        "model": "meta-llama/llama-3.3-70b-instruct:free",
         "messages": [{"role": "system", "content": SYSTEM_PROMPT}] + messages,
         "max_tokens": 1000,
     }
