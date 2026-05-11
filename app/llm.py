@@ -1,6 +1,7 @@
 import os
 import logging
 import google.generativeai as genai
+from app.knowledge import get_context
 
 logger = logging.getLogger(__name__)
 
@@ -14,11 +15,12 @@ THINK_KEYWORDS = [
     "порассуждай", "разбери подробно", "подумай хорошо",
 ]
 
-SYSTEM_PROMPT = """You are a personal AI assistant for a Head of Product & Quality
-who works with AI systems, multi-agent platforms, and enterprise software (TiONA platform).
+SYSTEM_PROMPT = """You are a personal AI assistant and facilitation expert.
+You have access to a facilitation knowledge base.
 
 You are helpful, analytical, and concise. You answer in the same language the user writes in.
-When discussing technical topics, be specific and practical.
+When discussing facilitation topics, use the knowledge base context provided.
+When no context is provided, answer from your general knowledge.
 """
 
 
@@ -37,14 +39,23 @@ async def chat(messages: list[dict]) -> str:
         (m["content"] for m in reversed(messages) if m["role"] == "user"), ""
     )
     model_name = select_model(last_user_msg)
+    nav_model = genai.GenerativeModel(model_name=MODEL_FLASH)
+
+    # Fetch relevant knowledge base context
+    context = await get_context(last_user_msg, nav_model)
+
+    system = SYSTEM_PROMPT
+    if context:
+        system += f"\n\n## Relevant knowledge base:\n\n{context}"
+        logger.info("Knowledge context injected (%d chars)", len(context))
+
     model = genai.GenerativeModel(
         model_name=model_name,
-        system_instruction=SYSTEM_PROMPT,
+        system_instruction=system,
     )
 
-    # Convert messages to Gemini format
     history = []
-    for m in messages[:-1]:  # all except last
+    for m in messages[:-1]:
         role = "user" if m["role"] == "user" else "model"
         history.append({"role": role, "parts": [m["content"]]})
 
@@ -55,5 +66,5 @@ async def chat(messages: list[dict]) -> str:
     if not content:
         return "Вибач, модель не відповіла. Спробуй ще раз."
 
-    logger.info("Gemini response [model=%s]", model_name)
+    logger.info("Gemini response [model=%s, kb=%s]", model_name, "yes" if context else "no")
     return content
