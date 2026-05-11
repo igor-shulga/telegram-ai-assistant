@@ -6,8 +6,8 @@ logger = logging.getLogger(__name__)
 
 GOOGLE_API_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
 
-MODEL_FLASH = "gemini-2.0-flash"
-MODEL_PRO   = "gemini-2.5-pro"
+MODEL_FLASH = "gemini-1.5-flash"
+MODEL_PRO   = "gemini-1.5-pro"
 
 # Keywords that trigger deep thinking mode (Pro model)
 THINK_KEYWORDS = [
