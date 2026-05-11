@@ -4,8 +4,8 @@ import google.generativeai as genai
 
 logger = logging.getLogger(__name__)
 
-MODEL_FLASH = "gemini-1.5-flash"
-MODEL_PRO   = "gemini-1.5-pro"
+MODEL_FLASH = "gemini-2.5-flash"
+MODEL_PRO   = "gemini-2.5-pro"
 
 THINK_KEYWORDS = [
     "подумай", "поміркуй", "розмірковуй",
