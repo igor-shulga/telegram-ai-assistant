@@ -1,136 +1,176 @@
 # Personal AI Assistant — Telegram Bot
 
-A personal AI assistant in Telegram powered by Google Gemini. Answers questions, remembers conversation context, and searches your facilitation knowledge base. Hosted on Render — free, 24/7.
-
-## What it does
-
-- **Chat:** Ask anything — the bot responds in the same language you write in
-- **Smart model switching:** casual questions use Gemini Flash (fast), deep analysis uses Gemini Pro (just say "think deeply" or "порассуждай")
-- **Knowledge base:** Searches your facilitation wiki (GitHub) and injects relevant pages into context automatically
-- **Conversation memory:** Remembers the last 10 messages within a session
-- **Single-user:** Only responds to your Telegram account
-
-## Message examples
-
-```
-You: What technique should I use for a group of 40 people making a fast decision?
-Bot: [searches knowledge base → loads relevant wiki pages → answers with specific techniques]
-
-You: подумай детально про ризики цього підходу
-Bot: [switches to Pro model → deeper analysis]
-
-You: /clear
-Bot: Context cleared.
-```
+Персональний AI асистент в Telegram. Відповідає на питання, пам'ятає контекст розмови, знає базу знань з фасилітації. Безкоштовно, працює 24/7.
 
 ---
 
-## Setup Instructions
+## Що потрібно перед початком
 
-### Step 1 — Create a Telegram Bot
-
-1. Open Telegram and search for **@BotFather**
-2. Send `/newbot`
-3. Enter a name and username for your bot
-4. Save the token — looks like `123456789:ABCdef...`
-
-### Step 2 — Get your Telegram User ID
-
-1. Open Telegram and search for **@userinfobot**
-2. Send any message to it
-3. It replies with your numeric user ID — save it (e.g. `123456789`)
-
-This ID is used to restrict the bot so only you can use it.
-
-### Step 3 — Get a Google AI API Key (free)
-
-1. Go to **aistudio.google.com**
-2. Sign in with your Google account
-3. Click **Get API key** → **Create API key in new project**
-4. Save the key — starts with `AIza...`
-
-> **Important:** Create the key in a **new project** to get a fresh free quota.
-> Free tier: 1,500 requests/day for Gemini Flash — more than enough for personal use.
-
-### Step 4 — Deploy to Render (free hosting)
-
-1. Fork this repo to your GitHub account
-2. Go to **render.com** and sign up (free, GitHub login works)
-3. Click **New → Web Service**
-4. Connect your GitHub account and select your forked repo
-5. Set **Runtime** to **Docker**
-6. Click **Create Web Service** — note the URL it gives you (e.g. `https://my-assistant-xyz.onrender.com`)
-
-### Step 5 — Add Environment Variables
-
-In Render: **Environment → Add variable** (add all 4):
-
-| Variable | Value | Where to get it |
-|----------|-------|----------------|
-| `TELEGRAM_BOT_TOKEN` | `123456:ABC...` | Step 1 — BotFather |
-| `GOOGLE_API_KEY` | `AIza...` | Step 3 — AI Studio |
-| `WEBHOOK_BASE_URL` | `https://your-app.onrender.com` | Step 4 — Render URL |
-| `ALLOWED_USER_ID` | `123456789` | Step 2 — userinfobot |
-
-Click **Save, rebuild, and deploy**.
-
-### Step 6 — Test it
-
-1. Open Telegram and find your bot
-2. Send `/start`
-3. Ask it anything
-
-> **Note on cold starts:** Render free tier sleeps after 15 minutes of inactivity. The first message after a sleep takes ~30-50 seconds. Subsequent messages are fast.
+- Акаунт в **Telegram**
+- Акаунт на **GitHub** (безкоштовно на github.com)
+- Акаунт на **Google** (звичайна Gmail пошта підходить)
+- Акаунт на **Render** (безкоштовно на render.com)
+- Комп'ютер з браузером — більше нічого
 
 ---
 
-## Commands
+## Крок 1 — Створити Telegram бота
 
-| Command | What it does |
-|---------|-------------|
-| `/start` | Welcome message |
-| `/clear` | Clear conversation context |
+Бот — це акаунт в Telegram від імені якого буде відповідати AI.
 
-## Trigger deep thinking mode
+1. Відкрий Telegram (на телефоні або комп'ютері)
+2. В пошуку знайди **@BotFather** (офіційний бот із синьою галочкою)
+3. Натисни **START**
+4. Напиши `/newbot` і відправ
+5. BotFather запитає ім'я — напиши будь-яке, наприклад: `My AI Assistant`
+6. Потім запитає username (закінчується на `bot`) — наприклад: `my_ai_assistant_2024_bot`
+7. BotFather дасть **токен** вигляду `123456789:ABCdef...`
 
-Add any of these to your message to switch to Gemini Pro:
-
-- `подумай`, `порассуждай`, `розмірковуй`
-- `think deeply`, `reason`, `think harder`
-- `детально`, `подробно`, `глибоко`
-
----
-
-## Knowledge Base
-
-The bot searches a public GitHub repo (`telegram-ai-knowledge`) for relevant knowledge before answering. Currently contains a facilitation wiki (14 pages, 60+ techniques).
-
-**Two-phase navigation:**
-1. Bot reads `wiki/index.md` → Gemini selects relevant pages
-2. Bot loads those pages → Gemini answers with that context
-
-To add your own knowledge: edit the `telegram-ai-knowledge` repo and add markdown files with a one-line description in `wiki/index.md`.
+> Збережи токен — знадобиться в Кроці 5. Нікому не показуй.
 
 ---
 
-## Architecture
+## Крок 2 — Дізнатись свій Telegram ID
 
-```
-app/
-  main.py           ← FastAPI app + Telegram webhook registration
-  bot.py            ← aiogram message handlers (/start, /clear, messages)
-  llm.py            ← Gemini client with Flash/Pro switching
-  memory.py         ← In-memory conversation history (last 10 messages)
-  knowledge.py      ← GitHub knowledge base navigator (two-phase retrieval)
-Dockerfile          ← Python 3.12 container
-render.yaml         ← Render deployment config
-```
+ID — це числовий ідентифікатор твого акаунту. Бот буде відповідати тільки тобі.
 
-## Stack
+1. В Telegram знайди **@userinfobot**
+2. Натисни **START** або напиши будь-що
+3. Бот відповість — знайди рядок **Id:** і збережи це число (наприклад `123456789`)
 
-- **Bot framework:** aiogram v3 (webhook mode)
-- **Web server:** FastAPI + uvicorn
-- **LLM:** Google Gemini 2.5 Flash / Pro
-- **Knowledge base:** Public GitHub repo (raw file access, no auth needed)
-- **Hosting:** Render (free tier, Docker)
-- **Cost:** $0/month
+---
+
+## Крок 3 — Отримати Google AI ключ (безкоштовно)
+
+Це ключ доступу до Google Gemini — AI який буде відповідати на твої питання.
+
+1. Відкрий **aistudio.google.com** у браузері
+2. Увійди через свій Google акаунт
+3. Натисни **Get API key** (зверху або в лівому меню)
+4. Натисни **Create API key**
+5. У вікні що відкрилось натисни **Create API key in new project**
+6. З'явиться ключ вигляду `AIzaSy...` — скопіюй і збережи
+
+> Важливо: натискай **"in new project"** — це дає свіжий безкоштовний ліміт (1500 запитів на день).
+
+---
+
+## Крок 4 — Зареєструватись на Render і задеплоїти
+
+Render — безкоштовний хостинг де буде жити твій бот.
+
+### 4.1 Скопіювати проект на свій GitHub
+
+1. Відкрий **github.com** і увійди (або зареєструйся — безкоштовно)
+2. Відкрий: **github.com/igor-shulga/telegram-ai-assistant**
+3. Натисни **Fork** (правий верхній кут) → **Create fork**
+
+Тепер у тебе є своя копія за адресою `github.com/ТВІЙ_USERNAME/telegram-ai-assistant`
+
+### 4.2 Зареєструватись на Render
+
+1. Відкрий **render.com**
+2. Натисни **Get Started** → **Sign up with GitHub**
+3. Дозволь Render доступ до GitHub
+
+### 4.3 Створити Web Service
+
+1. На Render натисни **New +** → **Web Service**
+2. Натисни **Connect** поряд з `telegram-ai-assistant` (твоя копія)
+3. Заповни налаштування:
+   - **Name:** `my-ai-assistant` (будь-яка назва)
+   - **Region:** `Frankfurt (EU Central)` (найближче до України)
+   - **Runtime:** `Docker` (обери зі списку)
+   - **Instance Type:** `Free`
+4. Натисни **Create Web Service**
+
+Render почне збирати бота — це займе 3-5 хвилин. Зверху з'явиться URL вигляду `https://my-ai-assistant-xxxx.onrender.com` — **збережи його**.
+
+---
+
+## Крок 5 — Додати ключі та токени
+
+1. В Render відкрий свій сервіс → натисни **Environment** в лівому меню
+2. Натисни **Add Variable** і додай чотири змінні:
+
+| Key | Value | Звідки |
+|-----|-------|--------|
+| `TELEGRAM_BOT_TOKEN` | `123456789:ABCdef...` | Крок 1 — BotFather |
+| `GOOGLE_API_KEY` | `AIzaSy...` | Крок 3 — AI Studio |
+| `WEBHOOK_BASE_URL` | `https://my-ai-assistant-xxxx.onrender.com` | Крок 4 — URL з Render |
+| `ALLOWED_USER_ID` | `123456789` | Крок 2 — userinfobot |
+
+3. Натисни **Save, rebuild, and deploy**
+
+Зачекай 2-3 хвилини поки Render перезапуститься.
+
+---
+
+## Крок 6 — Перший тест
+
+1. Відкрий Telegram
+2. Знайди свого бота (username з Кроку 1)
+3. Натисни **START**
+4. Напиши будь-яке питання, наприклад: `Привіт, ти працюєш?`
+
+Бот відповість протягом 10-30 секунд.
+
+> Якщо немає відповіді 1 хвилину — можливо Render ще "прокидається" після деплою. Напиши ще раз.
+
+---
+
+## Команди бота
+
+| Команда | Що робить |
+|---------|-----------|
+| `/start` | Привітання і опис |
+| `/clear` | Очистити пам'ять розмови |
+
+---
+
+## Режим глибокого аналізу
+
+Бот використовує дві моделі:
+- **Звичайний режим** (швидкий) — для більшості питань
+- **Режим глибокого аналізу** (розумніший, повільніший) — для складних питань
+
+Щоб увімкнути глибокий аналіз — додай до повідомлення одне з цих слів:
+
+`подумай` / `порассуждай` / `розмірковуй` / `think deeply` / `детально` / `подробно`
+
+Приклад: *"Подумай детально — яку техніку фасилітації обрати для конфліктної групи?"*
+
+---
+
+## База знань (фасилітація)
+
+Бот знає 60+ технік фасилітації з wiki на GitHub. Коли питаєш про фасилітацію — він автоматично знаходить потрібні сторінки і відповідає на їх основі.
+
+Приклади питань:
+- *"Яку техніку використати для групи з 40 людей що приймають рішення?"*
+- *"Як провести ретроспективу онлайн?"*
+- *"Як зупинити домінуючого учасника не образивши його?"*
+
+---
+
+## Якщо щось пішло не так
+
+**Бот не відповідає:**
+- Зачекай 1 хвилину (Render "прокидається" після 15 хв неактивності)
+- Render → Logs — подивись чи є помилки
+
+**"Помилка при зверненні до LLM":**
+- Render → Environment → перевір що `GOOGLE_API_KEY` правильний (немає зайвих пробілів)
+- Спробуй створити новий ключ на aistudio.google.com в новому проекті
+
+**Бот відповідає але не тобі (або всім):**
+- Перевір що `ALLOWED_USER_ID` — твій числовий ID з @userinfobot
+- Не username (`@name`), а саме число
+
+---
+
+## Важливо знати
+
+- Render безкоштовний тір "засинає" через 15 хвилин без повідомлень. Перше повідомлення після сну займає ~30 секунд — це нормально.
+- Пам'ять розмови зберігається в межах сесії (до рестарту). Команда `/clear` очищає її вручну.
+- Бот відповідає тією мовою якою ти пишеш.
