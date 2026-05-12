@@ -1,7 +1,9 @@
 import os
+import io
 import logging
 import google.generativeai as genai
-from aiogram import Bot, Dispatcher, Router
+from google.generativeai import types as genai_types
+from aiogram import Bot, Dispatcher, Router, F
 from aiogram.types import Message
 from aiogram.filters import Command
 from app.llm import chat, MODEL_FLASH
@@ -108,6 +110,50 @@ async def cmd_inbox(message: Message) -> None:
     await message.bot.send_chat_action(message.chat.id, "typing")
     emails = get_recent_emails(query="is:unread", max_results=5)
     await message.answer(f"Непрочитані листи:\n\n{emails}")
+
+
+@router.message(F.voice)
+async def handle_voice(message: Message) -> None:
+    """Handle voice messages — transcribe and respond via Gemini."""
+    allowed = get_allowed_user_id()
+    if allowed and message.from_user.id != allowed:
+        return
+
+    await message.bot.send_chat_action(message.chat.id, "typing")
+
+    try:
+        # Download voice file from Telegram
+        file = await message.bot.get_file(message.voice.file_id)
+        buf = io.BytesIO()
+        await message.bot.download_file(file.file_path, buf)
+        audio_bytes = buf.getvalue()
+
+        # Send audio directly to Gemini — it transcribes + responds in one call
+        genai.configure(api_key=os.environ["GOOGLE_API_KEY"])
+        model = genai.GenerativeModel(
+            model_name=MODEL_FLASH,
+            system_instruction=(
+                "You are a personal AI assistant. "
+                "The user sent a voice message. Transcribe it and respond. "
+                "Answer in the same language as the voice message. "
+                "Use plain text only, no markdown symbols."
+            ),
+        )
+        response = model.generate_content([
+            genai_types.Part.from_bytes(data=audio_bytes, mime_type="audio/ogg"),
+            "Transcribe this voice message and respond to it.",
+        ])
+
+        text = response.text or "Не вдалось розпізнати голосове повідомлення."
+        user_id = message.from_user.id
+        add_message(user_id, "user", f"[voice] {text[:200]}")
+        add_message(user_id, "assistant", text)
+        await message.answer(text)
+        logger.info("Voice message processed (%d bytes)", len(audio_bytes))
+
+    except Exception as e:
+        logger.error("Voice processing error: %s", e)
+        await message.answer("Не вдалось обробити голосове повідомлення. Спробуй ще раз.")
 
 
 @router.message()
