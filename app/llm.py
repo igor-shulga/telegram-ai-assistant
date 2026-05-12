@@ -41,7 +41,7 @@ def select_model(last_user_message: str) -> str:
     return MODEL_FLASH
 
 
-async def chat(messages: list[dict]) -> str:
+async def chat(messages: list[dict], google_context: str = "") -> str:
     genai.configure(api_key=os.environ["GOOGLE_API_KEY"])
 
     last_user_msg = next(
@@ -57,6 +57,9 @@ async def chat(messages: list[dict]) -> str:
     if context:
         system += f"\n\n## Relevant knowledge base:\n\n{context}"
         logger.info("Knowledge context injected (%d chars)", len(context))
+    if google_context:
+        system += f"\n\n## Live data from Google:\n\n{google_context}"
+        logger.info("Google context injected (%d chars)", len(google_context))
 
     model = genai.GenerativeModel(
         model_name=model_name,
