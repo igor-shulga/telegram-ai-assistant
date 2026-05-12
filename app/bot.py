@@ -139,12 +139,25 @@ async def handle_voice(message: Message) -> None:
                 "Use plain text only, no markdown symbols."
             ),
         )
-        response = model.generate_content([
-            {"inline_data": {"mime_type": "audio/ogg", "data": base64.b64encode(audio_bytes).decode()}},
-            "Transcribe this voice message and respond to it.",
-        ])
+        import asyncio
+        from google.api_core.exceptions import ResourceExhausted
 
-        text = response.text or "Не вдалось розпізнати голосове повідомлення."
+        audio_part = {"inline_data": {"mime_type": "audio/ogg", "data": base64.b64encode(audio_bytes).decode()}}
+
+        text = None
+        for attempt in range(3):
+            try:
+                response = model.generate_content([audio_part, "Transcribe this voice message and respond to it."])
+                text = response.text
+                break
+            except ResourceExhausted:
+                if attempt < 2:
+                    await asyncio.sleep(30 * (attempt + 1))
+                else:
+                    await message.answer("Забагато запитів, спробуй через хвилину.")
+                    return
+
+        text = text or "Не вдалось розпізнати голосове повідомлення."
         user_id = message.from_user.id
         add_message(user_id, "user", f"[voice] {text[:200]}")
         add_message(user_id, "assistant", text)
