@@ -1,6 +1,8 @@
 import os
+import asyncio
 import logging
 import google.generativeai as genai
+from google.api_core.exceptions import ResourceExhausted
 from app.knowledge import get_context
 
 logger = logging.getLogger(__name__)
@@ -67,11 +69,22 @@ async def chat(messages: list[dict]) -> str:
         history.append({"role": role, "parts": [m["content"]]})
 
     chat_session = model.start_chat(history=history)
-    response = chat_session.send_message(last_user_msg)
 
-    content = response.text
-    if not content:
-        return "Вибач, модель не відповіла. Спробуй ще раз."
-
-    logger.info("Gemini response [model=%s, kb=%s]", model_name, "yes" if context else "no")
-    return content
+    for attempt in range(3):
+        try:
+            response = chat_session.send_message(last_user_msg)
+            content = response.text
+            if not content:
+                return "Вибач, модель не відповіла. Спробуй ще раз."
+            logger.info("Gemini response [model=%s, kb=%s]", model_name, "yes" if context else "no")
+            return content
+        except ResourceExhausted as e:
+            wait = 30 * (attempt + 1)
+            logger.warning("Rate limit hit (attempt %d/3), waiting %ds: %s", attempt + 1, wait, str(e)[:100])
+            if attempt < 2:
+                await asyncio.sleep(wait)
+            else:
+                return "Забагато запитів, спробуй через хвилину."
+        except Exception as e:
+            logger.error("Gemini error: %s", e)
+            return "Помилка при зверненні до LLM. Спробуй ще раз."

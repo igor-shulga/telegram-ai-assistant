@@ -1,20 +1,36 @@
 """
 Knowledge base integration — reads from public GitHub repo.
-Uses two-phase navigation: README/index → select relevant files → load content.
+Uses keyword matching (no LLM) to select relevant files — saves API quota.
 """
 
 import logging
 import httpx
+import re
 
 logger = logging.getLogger(__name__)
 
 REPO_RAW = "https://raw.githubusercontent.com/igor-shulga/telegram-ai-knowledge/main"
-WIKI_INDEX = f"{REPO_RAW}/wiki/index.md"
-README = f"{REPO_RAW}/README.md"
+
+# Map keywords to wiki files (no LLM needed for navigation)
+KEYWORD_MAP = {
+    "wiki/01-preparation.md":       ["підготовка", "preparation", "plan", "план", "agenda", "агенда", "цілі", "goals"],
+    "wiki/02-opening.md":           ["відкриття", "opening", "старт", "start", "check-in", "знайомство"],
+    "wiki/03-divergence.md":        ["дивергенція", "divergence", "brainstorm", "брейнсторм", "ідеї", "ideas", "генерація"],
+    "wiki/04-emergence.md":         ["emergence", "групова динаміка", "group dynamics", "консенсус", "consensus"],
+    "wiki/05-convergence.md":       ["конвергенція", "convergence", "рішення", "decision", "вибір", "choice", "пріоритет", "voting", "голосування", "dotmocracy"],
+    "wiki/06-action-planning.md":   ["дії", "actions", "план дій", "action plan", "наступні кроки", "next steps"],
+    "wiki/07-closing.md":           ["закриття", "closing", "завершення", "wrap", "підсумок", "summary"],
+    "wiki/08-hybrid-remote.md":     ["онлайн", "online", "remote", "гібрид", "hybrid", "zoom", "miro", "mural", "virtual"],
+    "wiki/09-retrospectives.md":    ["ретро", "retro", "retrospective", "ретроспектива", "sprint review"],
+    "wiki/10-digital-tools.md":     ["інструменти", "tools", "miro", "mural", "mentimeter", "digital", "цифров"],
+    "wiki/11-cultural-competency.md": ["культура", "culture", "різноманіття", "diversity", "крос-культур", "cross-cultural"],
+    "wiki/12-facilitator-development.md": ["розвиток", "development", "навички фасилітатора", "facilitator skills", "коуч", "coach"],
+    "wiki/13-quick-reference.md":   ["техніка", "technique", "метод", "method", "інструмент", "tool", "швидко", "quick", "reference"],
+    "wiki/overview.md":             ["фасилітація", "facilitation", "що таке", "what is", "огляд", "overview"],
+}
 
 
 async def fetch_raw(path: str) -> str:
-    """Fetch raw file content from GitHub."""
     url = f"{REPO_RAW}/{path.lstrip('/')}"
     async with httpx.AsyncClient(timeout=10) as client:
         resp = await client.get(url)
@@ -24,43 +40,36 @@ async def fetch_raw(path: str) -> str:
         return ""
 
 
-async def get_context(question: str, model) -> str:
+def select_files_by_keywords(question: str) -> list[str]:
+    """Select relevant wiki files using keyword matching — no LLM needed."""
+    q = question.lower()
+    scores = {}
+    for filepath, keywords in KEYWORD_MAP.items():
+        score = sum(1 for kw in keywords if kw in q)
+        if score > 0:
+            scores[filepath] = score
+
+    # Return top 2 files by score
+    ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+    selected = [f for f, _ in ranked[:2]]
+    logger.info("KB keyword match: %s", selected or "none")
+    return selected
+
+
+async def get_context(question: str, model=None) -> str:
     """
-    Two-phase knowledge retrieval:
-    1. Load wiki/index.md — Gemini selects relevant pages
-    2. Load those pages — return combined content
+    Get relevant knowledge base context using keyword matching.
+    model param kept for API compatibility but not used.
     """
-    index = await fetch_raw("wiki/index.md")
-    if not index:
+    files = select_files_by_keywords(question)
+    if not files:
         return ""
 
-    # Phase 1: ask model which files are relevant
-    selection_prompt = f"""You are a knowledge base navigator.
-
-Here is the index of available wiki pages:
-
-{index}
-
-User question: {question}
-
-List the filenames (e.g. wiki/03-divergence.md) that are most relevant to answer this question.
-Return ONLY a comma-separated list of filenames, nothing else. Maximum 3 files.
-If nothing is relevant, return: none
-"""
-    response = model.generate_content(selection_prompt)
-    selected = response.text.strip()
-    logger.info("Knowledge navigator selected: %s", selected)
-
-    if selected.lower() == "none" or not selected:
-        return ""
-
-    # Phase 2: load selected files
-    files = [f.strip() for f in selected.split(",") if f.strip()]
     contents = []
-    for filepath in files[:3]:
+    for filepath in files:
         content = await fetch_raw(filepath)
         if content:
             contents.append(f"## {filepath}\n\n{content}")
-            logger.info("Loaded knowledge file: %s", filepath)
+            logger.info("Loaded KB file: %s", filepath)
 
     return "\n\n---\n\n".join(contents)
