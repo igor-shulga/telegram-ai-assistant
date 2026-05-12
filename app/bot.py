@@ -64,6 +64,15 @@ def detect_intent(text: str) -> str | None:
     return None
 
 
+import asyncio as _asyncio
+_user_locks: dict[int, _asyncio.Lock] = {}
+
+def get_user_lock(user_id: int) -> _asyncio.Lock:
+    if user_id not in _user_locks:
+        _user_locks[user_id] = _asyncio.Lock()
+    return _user_locks[user_id]
+
+
 def get_allowed_user_id() -> int | None:
     val = os.environ.get("ALLOWED_USER_ID", "")
     return int(val) if val.strip() else None
@@ -119,7 +128,12 @@ async def handle_voice(message: Message) -> None:
     if allowed and message.from_user.id != allowed:
         return
 
-    await message.bot.send_chat_action(message.chat.id, "typing")
+    lock = get_user_lock(message.from_user.id)
+    if lock.locked():
+        return  # ignore Telegram retry while processing
+
+    async with lock:
+        await message.bot.send_chat_action(message.chat.id, "typing")
 
     try:
         # Download voice file from Telegram
@@ -180,72 +194,71 @@ async def handle_message(message: Message) -> None:
     if not text:
         return
 
-    await message.bot.send_chat_action(message.chat.id, "typing")
+    lock = get_user_lock(user_id)
+    if lock.locked():
+        return  # ignore Telegram retry while processing
 
-    # Inject Google context if relevant
-    google_context = ""
-    if google_enabled():
-        intent = detect_intent(text)
+    async with lock:
+        await message.bot.send_chat_action(message.chat.id, "typing")
 
-        # Feature 1: Create calendar event
-        if intent == "create_event":
-            try:
-                genai.configure(api_key=os.environ["GOOGLE_API_KEY"])
-                model = genai.GenerativeModel(model_name=MODEL_FLASH)
-                event_data = await parse_event_from_text(text, model)
-                if event_data:
-                    start_iso = f"{event_data['date']}T{event_data['time']}:00"
-                    result = create_calendar_event(
-                        title=event_data["title"],
-                        start_iso=start_iso,
-                        duration_minutes=event_data.get("duration_minutes", 60),
-                    )
-                    await message.answer(
-                        f"Подію створено: {event_data['title']} "
-                        f"на {event_data['date']} о {event_data['time']}"
-                    )
-                    add_message(user_id, "user", text)
-                    add_message(user_id, "assistant", f"Event created: {event_data['title']}")
-                    return
-                else:
-                    google_context = "[Could not parse event details from message]"
-            except Exception as e:
-                logger.error("Event creation error: %s", e)
-                google_context = "[Event creation failed — answering via LLM]"
+        # Inject Google context if relevant
+        google_context = ""
+        if google_enabled():
+            intent = detect_intent(text)
 
-        # Feature 2: Gmail search
-        elif intent == "email_search":
-            try:
-                genai.configure(api_key=os.environ["GOOGLE_API_KEY"])
-                model = genai.GenerativeModel(model_name=MODEL_FLASH)
-                gmail_query = await extract_gmail_query(text, model)
-                if gmail_query:
-                    emails = get_recent_emails(query=gmail_query, max_results=10)
+            if intent == "create_event":
+                try:
+                    genai.configure(api_key=os.environ["GOOGLE_API_KEY"])
+                    model = genai.GenerativeModel(model_name=MODEL_FLASH)
+                    event_data = await parse_event_from_text(text, model)
+                    if event_data:
+                        start_iso = f"{event_data['date']}T{event_data['time']}:00"
+                        create_calendar_event(
+                            title=event_data["title"],
+                            start_iso=start_iso,
+                            duration_minutes=event_data.get("duration_minutes", 60),
+                        )
+                        await message.answer(
+                            f"Подію створено: {event_data['title']} "
+                            f"на {event_data['date']} о {event_data['time']}"
+                        )
+                        add_message(user_id, "user", text)
+                        add_message(user_id, "assistant", f"Event created: {event_data['title']}")
+                        return
+                    else:
+                        google_context = "[Could not parse event details from message]"
+                except Exception as e:
+                    logger.error("Event creation error: %s", e)
+                    google_context = "[Event creation failed — answering via LLM]"
+
+            elif intent == "email_search":
+                try:
+                    genai.configure(api_key=os.environ["GOOGLE_API_KEY"])
+                    model = genai.GenerativeModel(model_name=MODEL_FLASH)
+                    gmail_query = await extract_gmail_query(text, model)
+                    emails = get_recent_emails(query=gmail_query or "is:unread", max_results=10)
                     google_context = f"[Gmail search: {gmail_query}]\n{emails}"
                     logger.info("Gmail search context injected: %s", gmail_query)
-                else:
-                    emails = get_recent_emails(max_results=5)
-                    google_context = f"[Gmail — recent emails]\n{emails}"
-            except Exception as e:
-                logger.error("Gmail search error: %s", e)
-                google_context = "[Gmail search failed]"
+                except Exception as e:
+                    logger.error("Gmail search error: %s", e)
 
-        elif intent == "calendar":
-            events = get_calendar_events(days_ahead=3)
-            google_context = f"[Google Calendar — next 3 days]\n{events}"
-            logger.info("Calendar context injected")
-        elif intent == "email":
-            emails = get_recent_emails(max_results=5)
-            google_context = f"[Gmail — recent emails]\n{emails}"
-            logger.info("Email context injected")
+            elif intent == "calendar":
+                events = get_calendar_events(days_ahead=3)
+                google_context = f"[Google Calendar — next 3 days]\n{events}"
+                logger.info("Calendar context injected")
 
-    add_message(user_id, "user", text)
-    history = get_history(user_id)
+            elif intent == "email":
+                emails = get_recent_emails(max_results=5)
+                google_context = f"[Gmail — recent emails]\n{emails}"
+                logger.info("Email context injected")
 
-    try:
-        response = await chat(history, google_context=google_context)
-        add_message(user_id, "assistant", response)
-        await message.answer(response)
-    except Exception as e:
-        logger.error("LLM error: %s", e)
-        await message.answer("Помилка при зверненні до LLM. Спробуй ще раз.")
+        add_message(user_id, "user", text)
+        history = get_history(user_id)
+
+        try:
+            response = await chat(history, google_context=google_context)
+            add_message(user_id, "assistant", response)
+            await message.answer(response)
+        except Exception as e:
+            logger.error("LLM error: %s", e)
+            await message.answer("Помилка при зверненні до LLM. Спробуй ще раз.")
