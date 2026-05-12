@@ -1,13 +1,19 @@
 """
-Knowledge base integration — reads from public GitHub repo.
+Knowledge base integration — reads from GitHub repo and Google Drive.
 Uses keyword matching (no LLM) to select relevant files — saves API quota.
 """
 
+import os
 import logging
 import httpx
 import re
 
 logger = logging.getLogger(__name__)
+
+
+def google_enabled() -> bool:
+    """Check if Google services are configured."""
+    return bool(os.environ.get("GOOGLE_REFRESH_TOKEN"))
 
 REPO_RAW = "https://raw.githubusercontent.com/igor-shulga/telegram-ai-knowledge/main"
 
@@ -56,20 +62,69 @@ def select_files_by_keywords(question: str) -> list[str]:
     return selected
 
 
-async def get_context(question: str, model=None) -> str:
+def get_drive_context(question: str) -> str:
+    """Get relevant knowledge from Google Drive 'my-brain' folder.
+
+    Uses keyword matching on file names to select relevant Drive files.
+    Returns empty string if Google not configured or no matches found.
     """
-    Get relevant knowledge base context using keyword matching.
-    model param kept for API compatibility but not used.
-    """
-    files = select_files_by_keywords(question)
-    if not files:
+    if not google_enabled():
         return ""
 
-    contents = []
-    for filepath in files:
-        content = await fetch_raw(filepath)
-        if content:
-            contents.append(f"## {filepath}\n\n{content}")
-            logger.info("Loaded KB file: %s", filepath)
+    try:
+        from app.google_services import list_drive_files, read_drive_file
 
-    return "\n\n---\n\n".join(contents)
+        files = list_drive_files(folder_name="my-brain")
+        if not files:
+            return ""
+
+        q = question.lower()
+        matched = []
+        for f in files:
+            name = f.get("name", "").lower().replace(".md", "").replace("-", " ").replace("_", " ")
+            desc = f.get("description", "").lower() if f.get("description") else ""
+            # Check if any word from the question appears in file name or description
+            words = re.findall(r"\w{3,}", q)
+            if any(w in name or w in desc for w in words):
+                matched.append(f)
+
+        if not matched:
+            return ""
+
+        # Read up to 3 matched files
+        contents = []
+        for f in matched[:3]:
+            content = read_drive_file(f["id"])
+            if content:
+                contents.append(f"## Drive: {f['name']}\n\n{content}")
+                logger.info("Loaded Drive KB file: %s", f["name"])
+
+        return "\n\n---\n\n".join(contents)
+    except Exception as e:
+        logger.error("Drive KB error: %s", e)
+        return ""
+
+
+async def get_context(question: str, model=None) -> str:
+    """Get relevant knowledge base context from GitHub and Google Drive.
+
+    Combines both sources. model param kept for API compatibility but not used.
+    """
+    parts = []
+
+    # GitHub KB
+    files = select_files_by_keywords(question)
+    if files:
+        for filepath in files:
+            content = await fetch_raw(filepath)
+            if content:
+                parts.append(f"## {filepath}\n\n{content}")
+                logger.info("Loaded KB file: %s", filepath)
+
+    # Google Drive KB
+    drive_content = get_drive_context(question)
+    if drive_content:
+        parts.append(drive_content)
+        logger.info("Drive KB context added (%d chars)", len(drive_content))
+
+    return "\n\n---\n\n".join(parts)

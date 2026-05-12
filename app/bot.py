@@ -1,19 +1,40 @@
 import os
 import logging
+import google.generativeai as genai
 from aiogram import Bot, Dispatcher, Router
 from aiogram.types import Message
 from aiogram.filters import Command
-from app.llm import chat
+from app.llm import chat, MODEL_FLASH
 from app.memory import add_message, get_history, clear_history
-from app.google_services import get_calendar_events, get_recent_emails
+from app.google_services import (
+    get_calendar_events,
+    get_recent_emails,
+    create_calendar_event,
+    parse_event_from_text,
+    extract_gmail_query,
+)
 
 logger = logging.getLogger(__name__)
 router = Router()
+
+# ─── Intent keywords ─────────────────────────────────────────────────────────
+
+CREATE_EVENT_KEYWORDS = [
+    "створи зустріч", "створи подію", "додай зустріч", "додай подію",
+    "заплануй", "create a meeting", "create meeting", "create event",
+    "schedule a meeting", "schedule meeting",
+]
 
 CALENDAR_KEYWORDS = [
     "календар", "calendar", "зустріч", "meeting", "завтра", "tomorrow",
     "сьогодні", "today", "розклад", "schedule", "події", "events",
     "що у мене", "what do i have", "покажи зустрічі",
+]
+
+EMAIL_SEARCH_KEYWORDS = [
+    "знайди листи", "знайди лист", "пошук листів", "пошук листи",
+    "search emails", "search email", "find emails", "find email",
+    "покажи листи від", "покажи листи за",
 ]
 
 EMAIL_KEYWORDS = [
@@ -24,7 +45,16 @@ EMAIL_KEYWORDS = [
 
 
 def detect_intent(text: str) -> str | None:
+    """Detect user intent from message text.
+
+    Priority order: create_event > email_search > calendar > email.
+    More specific intents are checked first to avoid false matches.
+    """
     t = text.lower()
+    if any(kw in t for kw in CREATE_EVENT_KEYWORDS):
+        return "create_event"
+    if any(kw in t for kw in EMAIL_SEARCH_KEYWORDS):
+        return "email_search"
     if any(kw in t for kw in CALENDAR_KEYWORDS):
         return "calendar"
     if any(kw in t for kw in EMAIL_KEYWORDS):
@@ -97,7 +127,51 @@ async def handle_message(message: Message) -> None:
     google_context = ""
     if google_enabled():
         intent = detect_intent(text)
-        if intent == "calendar":
+
+        # Feature 1: Create calendar event
+        if intent == "create_event":
+            try:
+                genai.configure(api_key=os.environ["GOOGLE_API_KEY"])
+                model = genai.GenerativeModel(model_name=MODEL_FLASH)
+                event_data = await parse_event_from_text(text, model)
+                if event_data:
+                    start_iso = f"{event_data['date']}T{event_data['time']}:00"
+                    result = create_calendar_event(
+                        title=event_data["title"],
+                        start_iso=start_iso,
+                        duration_minutes=event_data.get("duration_minutes", 60),
+                    )
+                    await message.answer(
+                        f"Подію створено: {event_data['title']} "
+                        f"на {event_data['date']} о {event_data['time']}"
+                    )
+                    add_message(user_id, "user", text)
+                    add_message(user_id, "assistant", f"Event created: {event_data['title']}")
+                    return
+                else:
+                    google_context = "[Could not parse event details from message]"
+            except Exception as e:
+                logger.error("Event creation error: %s", e)
+                google_context = "[Event creation failed — answering via LLM]"
+
+        # Feature 2: Gmail search
+        elif intent == "email_search":
+            try:
+                genai.configure(api_key=os.environ["GOOGLE_API_KEY"])
+                model = genai.GenerativeModel(model_name=MODEL_FLASH)
+                gmail_query = await extract_gmail_query(text, model)
+                if gmail_query:
+                    emails = get_recent_emails(query=gmail_query, max_results=10)
+                    google_context = f"[Gmail search: {gmail_query}]\n{emails}"
+                    logger.info("Gmail search context injected: %s", gmail_query)
+                else:
+                    emails = get_recent_emails(max_results=5)
+                    google_context = f"[Gmail — recent emails]\n{emails}"
+            except Exception as e:
+                logger.error("Gmail search error: %s", e)
+                google_context = "[Gmail search failed]"
+
+        elif intent == "calendar":
             events = get_calendar_events(days_ahead=3)
             google_context = f"[Google Calendar — next 3 days]\n{events}"
             logger.info("Calendar context injected")

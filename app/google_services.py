@@ -4,6 +4,8 @@ Uses OAuth2 refresh token — no browser interaction needed after setup.
 """
 
 import os
+import re
+import json
 import logging
 from datetime import datetime, timedelta, timezone
 from google.oauth2.credentials import Credentials
@@ -90,6 +92,69 @@ def create_calendar_event(title: str, start_iso: str, duration_minutes: int = 60
         return f"Error: {e}"
 
 
+def get_calendar_events_raw(minutes_ahead: int = 20) -> list[dict]:
+    """Return raw calendar event dicts for the next N minutes."""
+    try:
+        creds = get_credentials()
+        service = build("calendar", "v3", credentials=creds)
+
+        now = datetime.now(timezone.utc)
+        end = now + timedelta(minutes=minutes_ahead)
+
+        events_result = service.events().list(
+            calendarId="primary",
+            timeMin=now.isoformat(),
+            timeMax=end.isoformat(),
+            maxResults=10,
+            singleEvents=True,
+            orderBy="startTime",
+        ).execute()
+
+        return events_result.get("items", [])
+    except HttpError as e:
+        logger.error("Calendar raw events error: %s", e)
+        return []
+    except Exception as e:
+        logger.error("Calendar raw events unexpected error: %s", e)
+        return []
+
+
+async def parse_event_from_text(text: str, model) -> dict | None:
+    """Use Gemini to extract calendar event details from natural language.
+
+    Returns dict with keys: title, date, time, duration_minutes.
+    Returns None if parsing fails.
+    """
+    today = datetime.now().strftime("%Y-%m-%d")
+    prompt = (
+        f"Today is {today}. Extract calendar event details from this text. "
+        f"Return ONLY valid JSON with these fields: "
+        f'"title" (string), "date" (YYYY-MM-DD), "time" (HH:MM, 24h format), '
+        f'"duration_minutes" (integer, default 60). '
+        f"No explanation, just JSON.\n\n"
+        f"Text: {text}"
+    )
+    try:
+        response = await model.generate_content_async(prompt)
+        raw = response.text.strip()
+        # Strip markdown code fences if present
+        raw = re.sub(r"^```(?:json)?\s*", "", raw)
+        raw = re.sub(r"\s*```$", "", raw)
+        data = json.loads(raw)
+        # Validate required fields
+        required = {"title", "date", "time", "duration_minutes"}
+        if not required.issubset(data.keys()):
+            logger.warning("Event parse missing fields: %s", data.keys())
+            return None
+        return data
+    except (json.JSONDecodeError, ValueError) as e:
+        logger.warning("Event parse JSON error: %s", e)
+        return None
+    except Exception as e:
+        logger.error("Event parse error: %s", e)
+        return None
+
+
 # ─── GMAIL ────────────────────────────────────────────────────────────────────
 
 def get_recent_emails(query: str = "", max_results: int = 5) -> str:
@@ -126,6 +191,27 @@ def get_recent_emails(query: str = "", max_results: int = 5) -> str:
     except HttpError as e:
         logger.error("Gmail error: %s", e)
         return f"Gmail error: {e}"
+
+
+async def extract_gmail_query(text: str, model) -> str:
+    """Use Gemini to convert natural language into a Gmail search query.
+
+    Maps phrases like 'from Ivanov' to 'from:Ivanov', 'last week' to 'newer_than:7d'.
+    Returns empty string on failure.
+    """
+    prompt = (
+        "Convert this natural language request to a Gmail search query. "
+        "Use Gmail search operators: from:, to:, subject:, newer_than:, older_than:, "
+        "has:attachment, is:unread, label:, etc. "
+        "Return ONLY the Gmail query string, nothing else.\n\n"
+        f"Request: {text}"
+    )
+    try:
+        response = await model.generate_content_async(prompt)
+        return response.text.strip()
+    except Exception as e:
+        logger.error("Gmail query extraction error: %s", e)
+        return ""
 
 
 # ─── GOOGLE DRIVE ─────────────────────────────────────────────────────────────

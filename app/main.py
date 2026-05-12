@@ -4,10 +4,9 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from aiogram import Bot, Dispatcher
-from aiogram.webhook.aiohttp_server import SimpleRequestHandler
 from aiogram.types import Update
 
-from app.bot import router
+from app.bot import router, google_enabled
 
 logging.basicConfig(
     level=logging.INFO,
@@ -30,10 +29,29 @@ async def lifespan(app: FastAPI):
     await bot.set_webhook(webhook_url)
     logger.info("Webhook set: %s", webhook_url)
 
+    # Start calendar reminder scheduler if Google is configured
+    scheduler = None
+    if google_enabled():
+        allowed_user_id = os.environ.get("ALLOWED_USER_ID", "")
+        if allowed_user_id.strip():
+            try:
+                from app.reminders import start_reminder_scheduler
+                chat_id = int(allowed_user_id)
+                scheduler = start_reminder_scheduler(bot, chat_id)
+                logger.info("Calendar reminders enabled for chat_id=%s", chat_id)
+            except Exception as e:
+                logger.error("Failed to start reminder scheduler: %s", e)
+        else:
+            logger.warning("ALLOWED_USER_ID not set — reminders disabled")
+
     app.state.bot = bot
     app.state.dp = dp
+    app.state.scheduler = scheduler
     yield
 
+    if scheduler:
+        scheduler.shutdown(wait=False)
+        logger.info("Reminder scheduler stopped")
     await bot.session.close()
     logger.info("Bot session closed")
 
