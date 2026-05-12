@@ -87,6 +87,8 @@
 5. На екрані **Test users** → **Add Users** → введи свій Gmail → **Add**
 6. **Save and Continue** → **Back to Dashboard**
 
+> **ВАЖЛИВО:** Якщо не додати свій Gmail як Test user — при авторизації отримаєш помилку `access_denied: Error 403`. Саме твій Gmail (той з яким авторизуєшся в браузері) має бути в списку.
+
 ### 4.4 Створи OAuth Credentials
 
 1. Ліве меню → **APIs & Services** → **Credentials**
