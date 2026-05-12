@@ -1,8 +1,8 @@
 import os
 import io
+import base64
 import logging
 import google.generativeai as genai
-from google.generativeai import types as genai_types
 from aiogram import Bot, Dispatcher, Router, F
 from aiogram.types import Message
 from aiogram.filters import Command
@@ -140,7 +140,7 @@ async def handle_voice(message: Message) -> None:
             ),
         )
         response = model.generate_content([
-            genai_types.Part.from_bytes(data=audio_bytes, mime_type="audio/ogg"),
+            {"inline_data": {"mime_type": "audio/ogg", "data": base64.b64encode(audio_bytes).decode()}},
             "Transcribe this voice message and respond to it.",
         ])
 
