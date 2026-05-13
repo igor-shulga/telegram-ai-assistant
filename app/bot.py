@@ -82,8 +82,15 @@ def google_enabled() -> bool:
     return bool(os.environ.get("GOOGLE_REFRESH_TOKEN"))
 
 
+def is_allowed(message: Message) -> bool:
+    allowed = get_allowed_user_id()
+    return not allowed or message.from_user.id == allowed
+
+
 @router.message(Command("start"))
 async def cmd_start(message: Message) -> None:
+    if not is_allowed(message):
+        return
     google_status = "Google Calendar, Gmail і Drive підключені." if google_enabled() else ""
     await message.answer(
         "Привіт! Я твій AI-асистент.\n\n"
@@ -97,12 +104,16 @@ async def cmd_start(message: Message) -> None:
 
 @router.message(Command("clear"))
 async def cmd_clear(message: Message) -> None:
+    if not is_allowed(message):
+        return
     clear_history(message.from_user.id)
     await message.answer("Контекст очищений.")
 
 
 @router.message(Command("today"))
 async def cmd_today(message: Message) -> None:
+    if not is_allowed(message):
+        return
     if not google_enabled():
         await message.answer("Google не підключений.")
         return
@@ -113,6 +124,8 @@ async def cmd_today(message: Message) -> None:
 
 @router.message(Command("inbox"))
 async def cmd_inbox(message: Message) -> None:
+    if not is_allowed(message):
+        return
     if not google_enabled():
         await message.answer("Google не підключений.")
         return
